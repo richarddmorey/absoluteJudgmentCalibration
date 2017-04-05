@@ -1,0 +1,23 @@
+
+CC = gcc
+
+CFLAGS = \
+	-O2\
+	-I.\
+	-I../include
+#	-fomit-frame-pointer
+
+LIBS = -L../lib -lmovie -ln_ga -lpm -lmgl -lalleg -lalfnt  
+
+
+VPATH = . 
+
+all : 
+
+%.exe: %.c
+	-$(CC) $(CFLAGS)  -o $@ $< $(LIBS)
+
+install:
+	
+
+clean:

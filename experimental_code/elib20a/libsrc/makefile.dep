@@ -1,0 +1,10 @@
+# Dependencies
+$(OBJDIR)/error.o: error.c $(INCDIR)/error.h $(INCDIR)/video.h
+$(OBJDIR)/image.o: image.c $(INCDIR)/image.h $(INCDIR)/error.h $(INCDIR)/video.h
+$(OBJDIR)/input.o: input.c $(INCDIR)/input.h
+$(OBJDIR)/movieobj.o: movieobj.c $(INCDIR)/movieobj.h $(INCDIR)/error.h $(INCDIR)/input.h $(INCDIR)/parport.h $(INCDIR)/tsc_time.h $(INCDIR)/graph.h
+$(OBJDIR)/response.o: response.c $(INCDIR)/response.h $(INCDIR)/input.h $(INCDIR)/tsc_time.h
+$(OBJDIR)/video.o: video.c $(INCDIR)/video.h $(INCDIR)/error.h $(INCDIR)/tsc_time.h $(INCDIR)/response.h
+$(OBJDIR)/exptlib1.o: exptlib1.c $(INCDIR)/exptlib.h
+$(OBJDIR)/parport.o: parport.c $(INCDIR)/parport.h $(INCDIR)/tsc_time.h
+

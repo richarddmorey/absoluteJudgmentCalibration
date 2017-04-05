@@ -1,0 +1,309 @@
+
+/*
+ * Movie Implementation 
+ * 
+ */
+
+#include "movieobj.h"
+#include "video.h"
+#include "input.h"
+#include "error.h"
+#include "tsc_time.h"
+#include "graph.h"
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <allegro.h>
+#include <alfont.h>
+
+static response *runMovieFull(movie *m, int numResponses);
+static response *runMovieUntilResponse(movie *m, int numResponses);
+int FrameTiming();
+
+extern long long unsigned int time_stamp;
+int notFirst = 0;  /* Flag is set to 0 before running a movie - requests getting frame timing and initial time */
+static long long unsigned int lastFrameTime = 0;
+static int frameDuration = 0, frameTol = 0;
+
+
+int Refresh_rate = 90;
+int AllegroON = 0;
+
+static id = 0;
+
+ALFONT_FONT * fontlst[16]; 
+
+void SetupMoviePackage(const char *fontlistfname)
+{
+  FILE *fontlist;
+
+  char fname[FILENAME_MAX];
+  int  fonttype;
+  int pathset = 0;
+  id = 1;
+
+  if (initSNAP())
+    error("can't initialize SNAP\n");
+
+  if (allegro_init())
+    error("can't initialize Allegro\n");
+  AllegroON = 1;
+
+  set_color_depth(8);
+/*  request_refresh_rate(Refresh_rate);
+*/
+  alfont_init();
+
+  if (fontlistfname == NULL) 
+    {
+      /* if no fontlist filename given, just try some defaults */
+      if (!(fontlst[id] = alfont_load_font("verdana.ttf")))
+         error("default font not loaded\n");
+      id++;
+    }
+  else 
+    {
+      if ((fontlist = fopen(fontlistfname, "r")) == NULL) 
+	error("could not open font list file: \"%s\"", fontlistfname);
+      
+      /* default directory is current directory */
+      while (!feof(fontlist))
+	{
+	  fname[0] = 0;
+	  fgets(fname, FILENAME_MAX, fontlist);
+	  /* chop off newline if present */
+	  if (fname[strlen(fname)-1] == '\n')
+	    fname[strlen(fname)-1] = 0;
+	  /* if it's a blank line, just skip */
+	  if (fname[0] == 0) 
+	    continue;
+
+	  if (id>15) error (" too many fonts in the list\n");    
+	  if(!(fontlst[id] = alfont_load_font(fname)))
+	     error("font %s not loaded\n", fname);
+          else {
+             id++;
+          }
+	      /* else printf ("loaded %s as id %d\n", fname, id); */
+	}
+    }
+
+  goImages();
+  setVideoMode(GRAPHICS_MODE);
+/*  makePalette(CLEAR); */
+  install_keyboard();
+  frameDuration = FrameTiming();
+  frameTol = frameDuration >> 3;
+ /* InitTimer(); */
+}
+
+void CleanupMoviePackage(void)
+{
+/*  SwitchTimer(OFF);
+  InstallTimer(DEFAULT_TIMER); */
+  remove_keyboard();
+  killImages();
+/*  bgi_closefont();  */
+  while(id >0){
+    alfont_destroy_font(fontlst[id]);
+    id--;
+  }
+  alfont_exit();  
+  setVideoMode(TEXT_MODE);
+}
+
+movie *initMovie(int numImages)
+{
+  movie *m;
+  m = (movie *) malloc(sizeof(movie));
+  m->numImages = numImages;
+  m->x = (struct movie_image *) calloc(numImages, sizeof(struct movie_image));
+  return m;
+}
+
+void  setMovie(movie *m, int pos, image *im, int numFrames)
+{
+  m->x[pos].im = im;
+  m->x[pos].numFrames = numFrames;
+}
+
+response *runMovie(movie *m, int showType, int numResponses)
+{
+  response *r;
+  switch (showType)
+    {
+    case FULL_SHOW:
+      r = runMovieFull(m, numResponses);
+      break;
+    case UNTIL_RESPONSE:
+      r = runMovieUntilResponse(m, numResponses);
+      break;
+    }
+  return r;
+}
+
+
+
+response *runMovieFull(movie *m, int numResponses)
+{
+  response *r;
+
+  int i, f, dt;
+  
+  
+  setPalette();
+
+  r = initResponse(numResponses);
+
+  if (!notFirst){
+    while (!Retrace());
+    while (Retrace());  
+    lastFrameTime = read_tsc();
+    notFirst = 1;
+  }
+  FlushKeyBuf();
+
+
+  /* Wait until the start of vertical retrace */
+/*  while (Retrace())
+    ;
+  while (!Retrace())
+    ;
+  Timer[RESPONSEtimer] = 0; */
+    
+
+  for (i=0; i<m->numImages; i++){    
+      checkResponse(r);
+
+      /* Draw  next picture */
+      drawPicture (*(m->x[i].im));
+
+      while(!Retrace())
+        checkResponse(r);
+ 
+      FlipPages(0);
+      while (Retrace())
+	checkResponse(r);
+
+      m->x[i].ts = time_stamp = read_tsc(); /* time of end of retrace */
+      dt = time_stamp - lastFrameTime;
+      lastFrameTime = time_stamp;
+      dt -= frameDuration;
+      if (dt <0 ) dt = -dt;
+      if (dt>frameTol) error("Missed timing %d %d\n",dt, frameDuration);
+      checkResponse(r);
+
+      
+      /* Wait for number of frames requested, minus one */
+      /* The last frame will be shown as the next pic is generated */
+      for (f=0; f < m->x[i].numFrames-1; f++){
+	/*  checkResponse(r); */
+          if (f >0){
+             while(!Retrace())
+               checkResponse(r);
+          }
+	  /* Wait until beam finishes retrace */
+	  while  (Retrace())
+	    checkResponse(r);
+          if (f >0){
+            time_stamp = read_tsc(); /* time of end of retrace */
+            dt = time_stamp - lastFrameTime;
+            lastFrameTime = time_stamp;
+            dt -= frameDuration;
+            if (dt <0 ) dt = -dt;
+            if (dt>frameTol) error("Missed timing 1 %d %d\n", dt, frameDuration);
+           }
+	  /* Wait until beam reaches bottom */
+	  /* while  (!Retrace())
+	     checkResponse(r); */
+      }
+      checkResponse(r);
+  }
+  
+  while (!responseReady(r))
+    ; 
+  return r;
+}
+
+response *runMovieUntilResponse(movie *m, int numResponses)
+{
+  response *r;
+
+  int i, f, fliptime;
+  
+  
+  setPalette();
+
+  r = initResponse(numResponses);
+
+  FlushKeyBuf();
+
+  /* Wait until the start of vertical retrace */
+/*  while (Retrace())
+    ;
+  while (!Retrace())
+    ;
+  Timer[RESPONSEtimer] = 0; */
+  
+  for (i=0; i<m->numImages && !responseReady(r); i++)
+    {
+     /* Draw  next picture */
+      drawPicture (*(m->x[i].im));
+
+      FlipPages(1);
+/*      while (Retrace())
+	checkResponse(r); */
+
+      m->x[i].ts = time_stamp;
+      
+      /* Wait until the beam is in retrace */
+      while (!Retrace() && !responseReady(r))
+	;
+      if (responseReady(r))
+	break;
+      
+      /* Wait for number of frames requested, minus one */
+      /* The last frame will be shown as the next pic is generated */
+      for (f=0; f < m->x[i].numFrames-1 && !responseReady(r); f++)
+	{
+	  /* Wait until beam finishes retrace */
+	  while  (Retrace() && !responseReady(r))
+	    ;
+	  /* Wait until beam reaches bottom */
+	  while  (!Retrace() && !responseReady(r))
+	    ;
+	}
+      if (responseReady(r))
+	break;
+    }
+  
+  while (!responseReady(r))
+    ;
+  return r;
+}
+
+/* estimates period of a frame in computer cycles (median of 9 cycles) */
+int FrameTiming()
+{
+  long long unsigned int cur, last;
+  int dt[10], i, j, t;
+
+  for(i = -1; i < 9; i++){
+    while (!Retrace());
+    while (Retrace());
+    cur = read_tsc();
+    if(i >= 0) dt[i] = cur - last;
+    last = cur;
+  }
+  for(i = 0; i<5; i++){
+    for (j = 8; j>i; j--){
+      if(dt[j] > dt[j-1]){
+        t = dt[j];
+        dt[j] = dt[j-1];
+        dt[j-1] = t;
+      }
+    }
+  }
+  return dt[4];
+}
